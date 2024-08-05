@@ -351,6 +351,9 @@ class VFOCResolution:
     voltage = mp.F32
     theta_rate = mp.F32
 
+class VDQResolution:
+    d_V = mp.F32
+    q_V = mp.F32
 
 class CurrentResolution:
     d_A = mp.F32
@@ -618,6 +621,7 @@ class Controller:
                  query_resolution=QueryResolution(),
                  position_resolution=PositionResolution(),
                  vfoc_resolution=VFOCResolution(),
+                 vdq_resolution=VDQResolution(),
                  current_resolution=CurrentResolution(),
                  transport=None,
                  can_prefix=0x0000):
@@ -625,6 +629,7 @@ class Controller:
         self.query_resolution = query_resolution
         self.position_resolution = position_resolution
         self.vfoc_resolution = vfoc_resolution
+        self.vdq_resolution = vdq_resolution
         self.current_resolution = current_resolution
         self.transport = transport
         self._parser = make_parser(id)
@@ -1069,6 +1074,49 @@ class Controller:
 
     async def set_vfoc(self, *args, **kwargs):
         return await self.execute(self.make_vfoc(**kwargs))
+
+    def make_vdq(self,
+                 *,
+                 d_V,
+                 q_V,
+                 query=False,
+                 query_override=None):
+        """Return a moteus.Command structure with data necessary to send a
+        voltage DQ mode command.
+        Written by Riley Pieper
+        """
+
+        result = self._make_command(
+            query=query, query_override=query_override)
+        cr = self.vdq_resolution
+        resolutions = [
+            cr.d_V if d_V is not None else mp.IGNORE,
+            cr.q_V if q_V is not None else mp.IGNORE,
+        ]
+
+        data_buf = io.BytesIO()
+
+        writer = Writer(data_buf)
+        writer.write_int8(mp.WRITE_INT8 | 0x01)
+        writer.write_int8(int(Register.MODE))
+        writer.write_int8(int(Mode.VOLTAGE_DQ))
+
+        combiner = mp.WriteCombiner(
+            writer, 0x00, int(Register.VOLTAGEDQ_D), resolutions)
+
+        if combiner.maybe_write():
+            writer.write_voltage(d_V, cr.d_V)
+        if combiner.maybe_write():
+            writer.write_voltage(q_V, cr.q_V)
+
+        self._format_query(query, query_override, data_buf, result)
+
+        result.data = data_buf.getvalue()
+
+        return result
+    
+    async def set_vdq(self, *args, **kwargs):
+        return await self.execute(self.make_vdq(**kwargs))
 
     def make_current(self,
                      *,
